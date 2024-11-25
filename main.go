@@ -41,6 +41,28 @@ type OutgoingMessage struct {
 	Status bool   `json:"status"`
 }
 
+type HistoryRequest struct {
+	Type   string `json:"type"`
+	Nonce  *int   `json:"nonce"`  // Nullable nonce
+	Amount int    `json:"amount"` // Number of messages to return
+	ChatID string `json:"chatId"` // Base64 ChatID
+}
+
+// MessageResponse represents a single message in the history response
+type MessageResponse struct {
+	Nonce     int    `json:"nonce"`
+	ChatID    string `json:"chatId"`
+	Signature string `json:"signature"`
+	Content   string `json:"content"`
+	ContentIV string `json:"contentIV"`
+}
+
+// HistoryResponse represents the server's response to a history request
+type HistoryResponse struct {
+	Type     string            `json:"type"`
+	Messages []MessageResponse `json:"messages"`
+}
+
 // Simulated last nonce (in a real app, store this persistently or in memory)
 var lastNonce = -1
 
@@ -130,8 +152,58 @@ func insertMessage(message IncomingMessage) error {
 	return nil
 }
 
+// Fetch chat history from the database
+func fetchHistory(chatID []byte, nonce *int, amount int) ([]MessageResponse, error) {
+	var rows *sql.Rows
+	var err error
+
+	if nonce == nil {
+		// Fetch the latest messages if nonce is nil
+		rows, err = db.Query(`
+			SELECT nonce, chat_id, signature, content, content_iv 
+			FROM messages 
+			WHERE chat_id = $1 
+			ORDER BY nonce DESC 
+			LIMIT $2`, chatID, amount)
+	} else {
+		// Fetch messages before or including the given nonce
+		rows, err = db.Query(`
+			SELECT nonce, chat_id, signature, content, content_iv 
+			FROM messages 
+			WHERE chat_id = $1 AND nonce <= $2 
+			ORDER BY nonce DESC 
+			LIMIT $3`, chatID, *nonce, amount)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch history: %v", err)
+	}
+	defer rows.Close()
+
+	var messages []MessageResponse
+	for rows.Next() {
+		var nonce int
+		var chatID, signature, content, contentIV []byte
+
+		err := rows.Scan(&nonce, &chatID, &signature, &content, &contentIV)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		// Add message to the response list
+		messages = append(messages, MessageResponse{
+			Nonce:     nonce,
+			ChatID:    base64.StdEncoding.EncodeToString(chatID),
+			Signature: base64.StdEncoding.EncodeToString(signature),
+			Content:   base64.StdEncoding.EncodeToString(content),
+			ContentIV: base64.StdEncoding.EncodeToString(contentIV),
+		})
+	}
+
+	return messages, nil
+}
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Upgrade HTTP to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println("Error upgrading to WebSocket:", err)
@@ -140,15 +212,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	for {
-		// Read message
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			fmt.Println("Error reading message:", err)
 			break
 		}
 
-		// Parse JSON
-		var incoming IncomingMessage
+		var incoming map[string]interface{}
 		err = json.Unmarshal(msg, &incoming)
 		if err != nil {
 			fmt.Println("Error parsing JSON:", err)
@@ -156,16 +226,66 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Validate and insert into DB
-		err = insertMessage(incoming)
-		if err != nil {
-			fmt.Println("Error:", err)
-			sendResponse(conn, false)
-			continue
-		}
+		// Determine request type
+		switch incoming["type"] {
+		case "send":
+			// Process "send" type (same as before)
+			var sendMsg IncomingMessage
+			err = json.Unmarshal(msg, &sendMsg)
+			if err != nil {
+				fmt.Println("Error parsing 'send' message:", err)
+				sendResponse(conn, false)
+				continue
+			}
+			err = insertMessage(sendMsg)
+			if err != nil {
+				fmt.Println("Error:", err)
+				sendResponse(conn, false)
+				continue
+			}
+			sendResponse(conn, true)
 
-		// Send success response
-		sendResponse(conn, true)
+		case "history":
+			// Process "history" type
+			var historyReq HistoryRequest
+			err = json.Unmarshal(msg, &historyReq)
+			if err != nil {
+				fmt.Println("Error parsing 'history' request:", err)
+				sendResponse(conn, false)
+				continue
+			}
+
+			// Decode ChatID
+			chatID, err := base64.StdEncoding.DecodeString(historyReq.ChatID)
+			if err != nil {
+				fmt.Println("Invalid ChatID in 'history' request:", err)
+				sendResponse(conn, false)
+				continue
+			}
+
+			// Fetch history
+			messages, err := fetchHistory(chatID, historyReq.Nonce, historyReq.Amount)
+			if err != nil {
+				fmt.Println("Error fetching history:", err)
+				sendResponse(conn, false)
+				continue
+			}
+
+			// Send history response
+			historyResp := HistoryResponse{
+				Type:     "response",
+				Messages: messages,
+			}
+			err = conn.WriteJSON(historyResp)
+			if err != nil {
+				fmt.Println("Error sending history response:", err)
+			}
+
+		default:
+			// Unknown type
+			fmt.Println("Unknown request type")
+			sendResponse(conn, false)
+		}
 	}
 }
 
