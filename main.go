@@ -64,6 +64,22 @@ func initDB() {
 	fmt.Println("Database connected successfully.")
 }
 
+// Fetch the last nonce for the given ChatID from the database
+func getLastNonce(chatID []byte) (int, error) {
+	var lastNonce sql.NullInt32 // Use sql.NullInt32 to handle NULLs
+	err := db.QueryRow(`
+		SELECT MAX(nonce) 
+		FROM messages 
+		WHERE chat_id = $1`, chatID).Scan(&lastNonce)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to fetch last nonce: %v", err)
+	}
+	if !lastNonce.Valid {
+		return -1, nil // No messages for this ChatID yet
+	}
+	return int(lastNonce.Int32), nil
+}
+
 // Insert message data into PostgreSQL
 func insertMessage(message IncomingMessage) error {
 	// Decode the base64-encoded fields
@@ -85,6 +101,17 @@ func insertMessage(message IncomingMessage) error {
 	contentIV, err := base64.StdEncoding.DecodeString(message.Message.ContentIV)
 	if err != nil {
 		return fmt.Errorf("invalid ContentIV: %v", err)
+	}
+
+	// Fetch the last nonce for the given ChatID
+	lastNonce, err := getLastNonce(chatID)
+	if err != nil {
+		return fmt.Errorf("error fetching last nonce: %v", err)
+	}
+
+	// Validate the nonce
+	if message.Message.Nonce != lastNonce+1 {
+		return fmt.Errorf("invalid nonce: got %d, expected %d", message.Message.Nonce, lastNonce+1)
 	}
 
 	// Insert the message into the database
@@ -130,20 +157,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validate and insert into DB
-		if isValidMessage(incoming) {
-			fmt.Println("Message is valid")
-			err = insertMessage(incoming)
-			if err != nil {
-				fmt.Println("Error inserting message into DB:", err)
-				sendResponse(conn, false)
-				continue
-			}
-			lastNonce = incoming.Message.Nonce // Update last nonce
-			sendResponse(conn, true)           // Send success response
-		} else {
-			fmt.Println("Message is invalid")
-			sendResponse(conn, false) // Send failure response
+		err = insertMessage(incoming)
+		if err != nil {
+			fmt.Println("Error:", err)
+			sendResponse(conn, false)
+			continue
 		}
+
+		// Send success response
+		sendResponse(conn, true)
 	}
 }
 
@@ -207,8 +229,8 @@ func main() {
 	// Handle WebSocket requests
 	http.HandleFunc("/ws", handleWebSocket)
 
-	port := "8080"
-	fmt.Printf("WebSocket server started at ws://localhost:%s/ws\n", port)
+	port := os.Getenv("PORT")
+	fmt.Printf("WebSocket server started at ws://seed:%s/ws\n", port)
 
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
