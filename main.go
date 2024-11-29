@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
@@ -22,6 +23,9 @@ var upgrader = websocket.Upgrader{
 		return true // Allow all origins (adjust for security in production)
 	},
 }
+
+var subscriptions = make(map[*websocket.Conn]map[string]bool) // Conn -> ChatID set
+var subscriptionsMutex = &sync.Mutex{}                        // Mutex for thread-safe access
 
 // Incoming JSON structure
 type IncomingMessage struct {
@@ -63,8 +67,20 @@ type HistoryResponse struct {
 	Messages []MessageResponse `json:"messages"`
 }
 
-// Simulated last nonce (in a real app, store this persistently or in memory)
-var lastNonce = -1
+type EventMessage struct {
+	Type  string      `json:"type"` // Always "event"
+	Event EventDetail `json:"event"`
+}
+
+type EventDetail struct {
+	Type    string          `json:"type"` // "new"
+	Message MessageResponse `json:"message"`
+}
+
+type SubscriptionRequest struct {
+	Type   string   `json:"type"`   // "subscribe" or "unsubscribe"
+	ChatID []string `json:"chatId"` // List of ChatIDs in Base64
+}
 
 // Initialize PostgreSQL connection
 func initDB() {
@@ -203,13 +219,77 @@ func fetchHistory(chatID []byte, nonce *int, amount int) ([]MessageResponse, err
 	return messages, nil
 }
 
+func handleSubscribe(conn *websocket.Conn, request SubscriptionRequest) {
+	subscriptionsMutex.Lock()
+	defer subscriptionsMutex.Unlock()
+
+	// Ensure the connection has a subscription map
+	if subscriptions[conn] == nil {
+		subscriptions[conn] = make(map[string]bool)
+	}
+
+	// Add chat IDs to the subscription list
+	for _, chatID := range request.ChatID {
+		subscriptions[conn][chatID] = true
+	}
+}
+
+func handleUnsubscribe(conn *websocket.Conn, request SubscriptionRequest) {
+	subscriptionsMutex.Lock()
+	defer subscriptionsMutex.Unlock()
+
+	// Remove chat IDs from the subscription list
+	if subscriptions[conn] != nil {
+		for _, chatID := range request.ChatID {
+			delete(subscriptions[conn], chatID)
+		}
+
+		// Remove the connection from the map if no subscriptions remain
+		if len(subscriptions[conn]) == 0 {
+			delete(subscriptions, conn)
+		}
+	}
+}
+
+func broadcastEvent(message MessageResponse) {
+	event := EventMessage{
+		Type: "event",
+		Event: EventDetail{
+			Type:    "new",
+			Message: message,
+		},
+	}
+
+	subscriptionsMutex.Lock()
+	defer subscriptionsMutex.Unlock()
+
+	// Iterate through all subscriptions
+	for conn, chatIDs := range subscriptions {
+		if chatIDs[message.ChatID] {
+			// Send event only to subscribers of the message's ChatID
+			err := conn.WriteJSON(event)
+			if err != nil {
+				fmt.Printf("Error broadcasting to connection: %v\n", err)
+				conn.Close()
+				delete(subscriptions, conn) // Remove broken connection
+			}
+		}
+	}
+}
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println("Error upgrading to WebSocket:", err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		// Cleanup on disconnect
+		subscriptionsMutex.Lock()
+		delete(subscriptions, conn)
+		subscriptionsMutex.Unlock()
+		conn.Close()
+	}()
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -222,14 +302,12 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		err = json.Unmarshal(msg, &incoming)
 		if err != nil {
 			fmt.Println("Error parsing JSON:", err)
-			sendResponse(conn, false)
 			continue
 		}
 
-		// Determine request type
 		switch incoming["type"] {
 		case "send":
-			// Process "send" type (same as before)
+			// Handle send message (existing logic)
 			var sendMsg IncomingMessage
 			err = json.Unmarshal(msg, &sendMsg)
 			if err != nil {
@@ -237,16 +315,30 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				sendResponse(conn, false)
 				continue
 			}
+
+			// Insert message into DB
 			err = insertMessage(sendMsg)
 			if err != nil {
-				fmt.Println("Error:", err)
+				fmt.Println("Error inserting message:", err)
 				sendResponse(conn, false)
 				continue
 			}
+
+			// Prepare the message for broadcasting
+			message := MessageResponse{
+				Nonce:     sendMsg.Message.Nonce,
+				ChatID:    sendMsg.Message.ChatID,
+				Signature: sendMsg.Message.Signature,
+				Content:   sendMsg.Message.Content,
+				ContentIV: sendMsg.Message.ContentIV,
+			}
+
+			// Broadcast the message to all subscribers
+			broadcastEvent(message)
 			sendResponse(conn, true)
 
 		case "history":
-			// Process "history" type
+			// Handle "history" type
 			var historyReq HistoryRequest
 			err = json.Unmarshal(msg, &historyReq)
 			if err != nil {
@@ -263,7 +355,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Fetch history
+			// Fetch history from the database
 			messages, err := fetchHistory(chatID, historyReq.Nonce, historyReq.Amount)
 			if err != nil {
 				fmt.Println("Error fetching history:", err)
@@ -281,50 +373,36 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("Error sending history response:", err)
 			}
 
+		case "subscribe":
+			// Handle subscribe request
+			var subRequest SubscriptionRequest
+			err = json.Unmarshal(msg, &subRequest)
+			if err != nil {
+				fmt.Println("Error parsing 'subscribe' request:", err)
+				sendResponse(conn, false)
+				continue
+			}
+			handleSubscribe(conn, subRequest)
+			sendResponse(conn, true)
+
+		case "unsubscribe":
+			// Handle unsubscribe request
+			var unsubRequest SubscriptionRequest
+			err = json.Unmarshal(msg, &unsubRequest)
+			if err != nil {
+				fmt.Println("Error parsing 'unsubscribe' request:", err)
+				sendResponse(conn, false)
+				continue
+			}
+			handleUnsubscribe(conn, unsubRequest)
+			sendResponse(conn, true)
+
 		default:
-			// Unknown type
-			fmt.Println("Unknown request type")
+			// Unknown request type
+			fmt.Println("Unknown request type:", incoming["type"])
 			sendResponse(conn, false)
 		}
 	}
-}
-
-func isValidMessage(incoming IncomingMessage) bool {
-	// Check type
-	if incoming.Type != "send" {
-		fmt.Println("Invalid type")
-		return false
-	}
-
-	// Check nonce
-	if incoming.Message.Nonce != lastNonce+1 {
-		fmt.Printf("Invalid nonce: got %d, expected %d\n", incoming.Message.Nonce, lastNonce+1)
-		return false
-	}
-
-	// Validate ChatID (256 bytes base64-encoded)
-	chatID, err := base64.StdEncoding.DecodeString(incoming.Message.ChatID)
-	if err != nil || len(chatID) != 256 {
-		fmt.Println("Invalid ChatID")
-		return false
-	}
-
-	// Validate Signature (256 bytes base64-encoded)
-	signature, err := base64.StdEncoding.DecodeString(incoming.Message.Signature)
-	if err != nil || len(signature) != 256 {
-		fmt.Println("Invalid Signature")
-		return false
-	}
-
-	// Validate ContentIV (12 bytes base64-encoded)
-	contentIV, err := base64.StdEncoding.DecodeString(incoming.Message.ContentIV)
-	if err != nil || len(contentIV) != 12 {
-		fmt.Println("Invalid ContentIV")
-		return false
-	}
-
-	// Content is not validated as per the requirements
-	return true
 }
 
 func sendResponse(conn *websocket.Conn, status bool) {
