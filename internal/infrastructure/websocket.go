@@ -68,8 +68,8 @@ func HandleWebSocketConnection(
 				ContentIV: sendMsg.Message.ContentIV,
 			}
 
-			websocketUseCase.BroadcastEvent(ws.Subscriptions, message)
 			responsesUseCase.StatusResponse(conn, true)
+			websocketUseCase.BroadcastEvent(ws.Subscriptions, message)
 
 		case "subscribe":
 			var subRequest entity.SubscriptionRequest
