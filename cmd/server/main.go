@@ -16,22 +16,26 @@ func main() {
 	}
 	defer db.Close()
 
-	messageUseCase := &usecase.MessageUseCase{
+	dataBaseUseCase := &usecase.DataBaseUseCase{
 		MessageRepository: db,
 	}
-	eventUseCase := &usecase.ResponsesUseCase{
-		MessageRepository: messageUseCase,
+	messagesUseCase := &usecase.MessagesUseCase{
+		DataBaseRepository: dataBaseUseCase,
 	}
-	websocketUseCase := &usecase.WebsocketUseCase{}
+	websocketUseCase := &usecase.WebsocketUseCase{
+		MessagesRepository: messagesUseCase,
+		DataBaseRepository: dataBaseUseCase,
+	}
 	websocketManager := websocketUseCase.NewWebSocketManager()
+
+	websocketUseCase.StartMessageProcessor(websocketManager)
 
 	http.HandleFunc("/ws", func(writer http.ResponseWriter, request *http.Request) {
 		infrastructure.HandleWebSocketConnection(
 			websocketManager,
 			writer,
 			request,
-			messageUseCase,
-			eventUseCase,
+			messagesUseCase,
 			websocketUseCase,
 		)
 	})

@@ -2,12 +2,16 @@ package usecase
 
 import (
 	"Seed/internal/entity"
+	repository "Seed/internal/interface"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"net/http"
 )
 
-type WebsocketUseCase struct{}
+type WebsocketUseCase struct {
+	MessagesRepository repository.MessagesRepository
+	DataBaseRepository repository.DataBaseRepository
+}
 
 func (uc *WebsocketUseCase) NewWebSocketManager() *entity.WebSocketManager {
 	return &entity.WebSocketManager{
@@ -17,6 +21,7 @@ func (uc *WebsocketUseCase) NewWebSocketManager() *entity.WebSocketManager {
 			},
 		},
 		Subscriptions: make(map[*websocket.Conn]map[string]bool),
+		MessageQueue:  make(chan entity.ConnectedMessage),
 	}
 }
 
@@ -53,25 +58,43 @@ func (uc *WebsocketUseCase) HandleUnsubscribe(
 }
 
 func (uc *WebsocketUseCase) BroadcastEvent(
-	subscriptions map[*websocket.Conn]map[string]bool,
-	message entity.OutcomeMessage,
+	ws *entity.WebSocketManager,
+	sendMsg entity.IncomeMessage,
 ) {
-	event := entity.NewEventResponse{
-		Type: "event",
-		Event: entity.NewEventDetail{
-			Type:    "new",
-			Message: message,
-		},
+	message := entity.OutcomeMessage{
+		Nonce:     sendMsg.Message.Nonce,
+		ChatID:    sendMsg.Message.ChatID,
+		Signature: sendMsg.Message.Signature,
+		Content:   sendMsg.Message.Content,
+		ContentIV: sendMsg.Message.ContentIV,
 	}
 
-	for conn, chatIDs := range subscriptions {
+	for conn, chatIDs := range ws.Subscriptions {
 		if chatIDs[message.ChatID] {
-			err := conn.WriteJSON(event)
+			err := uc.MessagesRepository.NewEventResponse(conn, message)
 			if err != nil {
 				fmt.Printf("Error broadcasting to connection: %v\n", err)
 				conn.Close()
-				delete(subscriptions, conn)
+				delete(ws.Subscriptions, conn)
 			}
 		}
 	}
+}
+
+func (uc *WebsocketUseCase) StartMessageProcessor(
+	ws *entity.WebSocketManager,
+) {
+	go func() {
+		for event := range ws.MessageQueue {
+			err := uc.DataBaseRepository.InsertMessage(event.Message)
+			if err != nil {
+				fmt.Println("Error inserting message:", err)
+				uc.MessagesRepository.StatusResponse(event.Connection, false)
+				continue
+			}
+
+			uc.MessagesRepository.StatusResponse(event.Connection, true)
+			uc.BroadcastEvent(ws, event.Message)
+		}
+	}()
 }

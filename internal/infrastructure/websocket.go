@@ -13,8 +13,7 @@ func HandleWebSocketConnection(
 	ws *entity.WebSocketManager,
 	w http.ResponseWriter,
 	r *http.Request,
-	messageUseCase *usecase.MessageUseCase,
-	responsesUseCase *usecase.ResponsesUseCase,
+	responsesUseCase *usecase.MessagesUseCase,
 	websocketUseCase *usecase.WebsocketUseCase,
 ) {
 	conn, err := ws.Upgrader.Upgrade(w, r, nil)
@@ -56,23 +55,12 @@ func HandleWebSocketConnection(
 				continue
 			}
 
-			err = messageUseCase.InsertMessage(sendMsg)
-			if err != nil {
-				fmt.Println("Error inserting message:", err)
-				responsesUseCase.StatusResponse(conn, false)
-				continue
+			message := entity.ConnectedMessage{
+				Connection: conn,
+				Message:    sendMsg,
 			}
 
-			message := entity.OutcomeMessage{
-				Nonce:     sendMsg.Message.Nonce,
-				ChatID:    sendMsg.Message.ChatID,
-				Signature: sendMsg.Message.Signature,
-				Content:   sendMsg.Message.Content,
-				ContentIV: sendMsg.Message.ContentIV,
-			}
-
-			responsesUseCase.StatusResponse(conn, true)
-			websocketUseCase.BroadcastEvent(ws.Subscriptions, message)
+			ws.MessageQueue <- message
 
 		case "subscribe":
 			var subRequest entity.SubscriptionRequest

@@ -5,7 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type ResponsesRepository interface {
+type MessagesRepository interface {
 	WaitEventResponse(conn *websocket.Conn, chatID string)
 	NewEventResponse(conn *websocket.Conn, message entity.OutcomeMessage) error
 

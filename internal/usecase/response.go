@@ -9,11 +9,11 @@ import (
 
 const MessagesLimit = 100
 
-type ResponsesUseCase struct {
-	MessageRepository repository.MessageRepository
+type MessagesUseCase struct {
+	DataBaseRepository repository.DataBaseRepository
 }
 
-func (uc *ResponsesUseCase) WaitEventResponse(
+func (uc *MessagesUseCase) WaitEventResponse(
 	conn *websocket.Conn,
 	chatID string,
 ) {
@@ -31,7 +31,7 @@ func (uc *ResponsesUseCase) WaitEventResponse(
 	}
 }
 
-func (uc *ResponsesUseCase) NewEventResponse(
+func (uc *MessagesUseCase) NewEventResponse(
 	conn *websocket.Conn,
 	message entity.OutcomeMessage,
 ) error {
@@ -51,7 +51,7 @@ func (uc *ResponsesUseCase) NewEventResponse(
 	return err
 }
 
-func (uc *ResponsesUseCase) StatusResponse(conn *websocket.Conn, status bool) {
+func (uc *MessagesUseCase) StatusResponse(conn *websocket.Conn, status bool) {
 	outgoing := entity.StatusResponse{
 		Type:   "response",
 		Status: status,
@@ -63,7 +63,7 @@ func (uc *ResponsesUseCase) StatusResponse(conn *websocket.Conn, status bool) {
 	}
 }
 
-func (uc *ResponsesUseCase) UnreadMessagesResponse(
+func (uc *MessagesUseCase) UnreadMessagesResponse(
 	conn *websocket.Conn,
 	chatID []byte,
 	nonce int,
@@ -71,7 +71,7 @@ func (uc *ResponsesUseCase) UnreadMessagesResponse(
 	currentNonce := nonce
 
 	for {
-		messages, err := uc.MessageRepository.FetchHistory(chatID, currentNonce, MessagesLimit)
+		messages, err := uc.DataBaseRepository.FetchHistory(chatID, currentNonce, MessagesLimit)
 
 		if err != nil {
 			fmt.Println("Error fetching history:", err)
