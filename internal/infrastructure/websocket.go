@@ -44,6 +44,9 @@ func HandleWebSocketConnection(
 		}
 
 		switch incoming["type"] {
+		case "ping":
+			responsesUseCase.StatusResponse(conn, true)
+
 		case "send":
 			var sendMsg entity.IncomeMessage
 			err = json.Unmarshal(msg, &sendMsg)
