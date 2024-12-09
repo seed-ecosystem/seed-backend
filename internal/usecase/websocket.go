@@ -20,8 +20,8 @@ func (uc *WebsocketUseCase) NewWebSocketManager() *entity.WebSocketManager {
 				return true
 			},
 		},
-		Subscriptions: make(map[*websocket.Conn]map[string]bool),
-		MessageQueue:  make(chan entity.ConnectedMessage),
+		Subscriptions: make(map[string]map[*websocket.Conn]bool),
+		MessageQueue:  make(map[string]chan *entity.ConnectedMessage),
 	}
 }
 
@@ -33,11 +33,7 @@ func (uc *WebsocketUseCase) HandleSubscribe(
 	ws.SubscriptionsMux.Lock()
 	defer ws.SubscriptionsMux.Unlock()
 
-	if ws.Subscriptions[conn] == nil {
-		ws.Subscriptions[conn] = make(map[string]bool)
-	}
-
-	ws.Subscriptions[conn][chatID] = true
+	uc.addConnection(ws, conn, chatID)
 }
 
 func (uc *WebsocketUseCase) HandleUnsubscribe(
@@ -48,13 +44,7 @@ func (uc *WebsocketUseCase) HandleUnsubscribe(
 	ws.SubscriptionsMux.Lock()
 	defer ws.SubscriptionsMux.Unlock()
 
-	if ws.Subscriptions[conn] != nil {
-		delete(ws.Subscriptions[conn], chatID)
-
-		if len(ws.Subscriptions[conn]) == 0 {
-			delete(ws.Subscriptions, conn)
-		}
-	}
+	uc.removeConnection(ws, conn, chatID)
 }
 
 func (uc *WebsocketUseCase) BroadcastEvent(
@@ -69,23 +59,61 @@ func (uc *WebsocketUseCase) BroadcastEvent(
 		ContentIV: sendMsg.Message.ContentIV,
 	}
 
-	for conn, chatIDs := range ws.Subscriptions {
-		if chatIDs[message.ChatID] {
-			err := uc.MessagesRepository.NewEventResponse(conn, message)
-			if err != nil {
-				fmt.Printf("Error broadcasting to connection: %v\n", err)
-				conn.Close()
-				delete(ws.Subscriptions, conn)
-			}
+	for conn := range ws.Subscriptions[sendMsg.Message.ChatID] {
+		err := uc.MessagesRepository.NewEventResponse(conn, message)
+		if err != nil {
+			fmt.Printf("Error broadcasting to connection: %v\n", err)
+			conn.Close()
+			uc.removeConnection(ws, conn, sendMsg.Message.ChatID)
 		}
 	}
 }
 
-func (uc *WebsocketUseCase) StartMessageProcessor(
+func (uc *WebsocketUseCase) addConnection(
 	ws *entity.WebSocketManager,
+	conn *websocket.Conn,
+	chatID string,
+) {
+	if ws.Subscriptions[chatID] == nil {
+		ws.Subscriptions[chatID] = make(map[*websocket.Conn]bool)
+	}
+
+	if ws.MessageQueue[chatID] == nil {
+		uc.startMessageProcessor(ws, chatID)
+	}
+
+	ws.Subscriptions[chatID][conn] = true
+}
+
+func (uc *WebsocketUseCase) removeConnection(
+	ws *entity.WebSocketManager,
+	conn *websocket.Conn,
+	chatID string,
+) {
+	if ws.Subscriptions[chatID] != nil {
+		delete(ws.Subscriptions[chatID], conn)
+
+		if len(ws.Subscriptions[chatID]) == 0 {
+			delete(ws.Subscriptions, chatID)
+			uc.stopMessageProcessor(ws, chatID)
+		}
+	}
+}
+
+func (uc *WebsocketUseCase) startMessageProcessor(
+	ws *entity.WebSocketManager,
+	chatID string,
 ) {
 	go func() {
-		for event := range ws.MessageQueue {
+		ws.MessageQueue[chatID] = make(chan *entity.ConnectedMessage)
+
+		for event := range ws.MessageQueue[chatID] {
+			if event == nil {
+				fmt.Println("All users have unsubscribed from the chat")
+				delete(ws.MessageQueue, chatID)
+				return
+			}
+
 			err := uc.DataBaseRepository.InsertMessage(event.Message)
 			if err != nil {
 				fmt.Println("Error inserting message:", err)
@@ -97,4 +125,11 @@ func (uc *WebsocketUseCase) StartMessageProcessor(
 			uc.BroadcastEvent(ws, event.Message)
 		}
 	}()
+}
+
+func (uc *WebsocketUseCase) stopMessageProcessor(
+	ws *entity.WebSocketManager,
+	chatID string,
+) {
+	ws.MessageQueue[chatID] <- nil
 }

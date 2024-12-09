@@ -18,7 +18,7 @@ type ConnectedMessage struct {
 
 type WebSocketManager struct {
 	Upgrader         websocket.Upgrader
-	Subscriptions    map[*websocket.Conn]map[string]bool
-	MessageQueue     chan ConnectedMessage
+	Subscriptions    map[string]map[*websocket.Conn]bool
+	MessageQueue     map[string]chan *ConnectedMessage
 	SubscriptionsMux sync.Mutex
 }

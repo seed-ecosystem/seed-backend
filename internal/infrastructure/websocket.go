@@ -21,12 +21,6 @@ func HandleWebSocketConnection(
 		fmt.Println("Error upgrading to WebSocket:", err)
 		return
 	}
-	defer func() {
-		ws.SubscriptionsMux.Lock()
-		delete(ws.Subscriptions, conn)
-		ws.SubscriptionsMux.Unlock()
-		conn.Close()
-	}()
 
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -60,7 +54,13 @@ func HandleWebSocketConnection(
 				Message:    sendMsg,
 			}
 
-			ws.MessageQueue <- message
+			select {
+			case ws.MessageQueue[sendMsg.Message.ChatID] <- &message:
+				fmt.Println("Message has been added to the queue for processing")
+			default:
+				fmt.Println("There are no subscribers to receive a message in the queue")
+				responsesUseCase.StatusResponse(conn, true)
+			}
 
 		case "subscribe":
 			var subRequest entity.SubscriptionRequest

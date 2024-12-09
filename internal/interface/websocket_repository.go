@@ -10,5 +10,4 @@ type WebsocketRepository interface {
 	HandleSubscribe(ws *entity.WebSocketManager, conn *websocket.Conn, chatID string)
 	HandleUnsubscribe(ws *entity.WebSocketManager, conn *websocket.Conn, chatID string)
 	BroadcastEvent(ws *entity.WebSocketManager, message entity.IncomeMessage)
-	StartMessageProcessor(ws *entity.WebSocketManager)
 }

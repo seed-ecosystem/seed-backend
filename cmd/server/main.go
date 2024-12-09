@@ -28,8 +28,6 @@ func main() {
 	}
 	websocketManager := websocketUseCase.NewWebSocketManager()
 
-	websocketUseCase.StartMessageProcessor(websocketManager)
-
 	http.HandleFunc("/ws", func(writer http.ResponseWriter, request *http.Request) {
 		infrastructure.HandleWebSocketConnection(
 			websocketManager,
