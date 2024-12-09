@@ -3,6 +3,7 @@ package usecase
 import (
 	"Seed/internal/entity"
 	repository "Seed/internal/interface"
+	"encoding/base64"
 	"fmt"
 	"github.com/gorilla/websocket"
 )
@@ -51,7 +52,10 @@ func (uc *MessagesUseCase) NewEventResponse(
 	return err
 }
 
-func (uc *MessagesUseCase) StatusResponse(conn *websocket.Conn, status bool) {
+func (uc *MessagesUseCase) StatusResponse(
+	conn *websocket.Conn,
+	status bool,
+) {
 	outgoing := entity.StatusResponse{
 		Type:   "response",
 		Status: status,
@@ -92,4 +96,28 @@ func (uc *MessagesUseCase) UnreadMessagesResponse(
 
 		currentNonce += MessagesLimit
 	}
+}
+
+func (uc *MessagesUseCase) IsValidMessage(
+	message entity.IncomeMessage,
+) bool {
+	chatID, err := base64.StdEncoding.DecodeString(message.Message.ChatID)
+	if err != nil || len(chatID) != 32 {
+		fmt.Println("Invalid ChatID")
+		return false
+	}
+
+	signature, err := base64.StdEncoding.DecodeString(message.Message.Signature)
+	if err != nil || len(signature) != 32 {
+		fmt.Println("Invalid Signature")
+		return false
+	}
+
+	contentIV, err := base64.StdEncoding.DecodeString(message.Message.ContentIV)
+	if err != nil || len(contentIV) != 12 {
+		fmt.Println("Invalid ContentIV")
+		return false
+	}
+
+	return true
 }

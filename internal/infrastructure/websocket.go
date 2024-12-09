@@ -49,6 +49,11 @@ func HandleWebSocketConnection(
 				continue
 			}
 
+			if !responsesUseCase.IsValidMessage(sendMsg) {
+				responsesUseCase.StatusResponse(conn, false)
+				continue
+			}
+
 			message := entity.ConnectedMessage{
 				Connection: conn,
 				Message:    sendMsg,
