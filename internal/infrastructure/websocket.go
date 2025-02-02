@@ -21,6 +21,7 @@ func HandleWebSocketConnection(
 		fmt.Println("Error upgrading to WebSocket:", err)
 		return
 	}
+	defer websocketUseCase.Disconnect(ws, conn)
 
 	for {
 		_, msg, err := conn.ReadMessage()

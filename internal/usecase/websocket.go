@@ -4,8 +4,9 @@ import (
 	"Seed/internal/entity"
 	repository "Seed/internal/interface"
 	"fmt"
-	"github.com/gorilla/websocket"
 	"net/http"
+
+	"github.com/gorilla/websocket"
 )
 
 type WebsocketUseCase struct {
@@ -20,8 +21,9 @@ func (uc *WebsocketUseCase) NewWebSocketManager() *entity.WebSocketManager {
 				return true
 			},
 		},
-		Subscriptions: make(map[string]map[*websocket.Conn]bool),
-		MessageQueue:  make(map[string]chan *entity.ConnectedMessage),
+		Chats:        make(map[string]map[*websocket.Conn]struct{}),
+		Connections:  make(map[*websocket.Conn]map[string]struct{}),
+		MessageQueue: make(map[string]chan *entity.ConnectedMessage),
 	}
 }
 
@@ -30,10 +32,7 @@ func (uc *WebsocketUseCase) HandleSubscribe(
 	conn *websocket.Conn,
 	chatID string,
 ) {
-	ws.SubscriptionsMux.Lock()
-	defer ws.SubscriptionsMux.Unlock()
-
-	uc.addConnection(ws, conn, chatID)
+	uc.subscribeToChat(ws, conn, chatID)
 }
 
 func (uc *WebsocketUseCase) HandleUnsubscribe(
@@ -41,10 +40,7 @@ func (uc *WebsocketUseCase) HandleUnsubscribe(
 	conn *websocket.Conn,
 	chatID string,
 ) {
-	ws.SubscriptionsMux.Lock()
-	defer ws.SubscriptionsMux.Unlock()
-
-	uc.removeConnection(ws, conn, chatID)
+	uc.unsubscribeFromChat(ws, conn, chatID)
 }
 
 func (uc *WebsocketUseCase) BroadcastEvent(
@@ -59,42 +55,75 @@ func (uc *WebsocketUseCase) BroadcastEvent(
 		ContentIV: sendMsg.Message.ContentIV,
 	}
 
-	for conn := range ws.Subscriptions[sendMsg.Message.ChatID] {
+	for conn := range ws.Chats[sendMsg.Message.ChatID] {
 		err := uc.MessagesRepository.NewEventResponse(conn, message)
 		if err != nil {
 			fmt.Printf("Error broadcasting to connection: %v\n", err)
-			conn.Close()
-			uc.removeConnection(ws, conn, sendMsg.Message.ChatID)
+			uc.Disconnect(ws, conn)
 		}
 	}
 }
 
-func (uc *WebsocketUseCase) addConnection(
+func (uc *WebsocketUseCase) Disconnect(
+	ws *entity.WebSocketManager,
+	conn *websocket.Conn,
+) {
+	defer conn.Close()
+
+	if ws.Connections[conn] != nil {
+		for chatID := range ws.Connections[conn] {
+			uc.unsubscribeFromChat(ws, conn, chatID)
+		}
+
+		delete(ws.Connections, conn)
+	}
+}
+
+func (uc *WebsocketUseCase) subscribeToChat(
 	ws *entity.WebSocketManager,
 	conn *websocket.Conn,
 	chatID string,
 ) {
-	if ws.Subscriptions[chatID] == nil {
-		ws.Subscriptions[chatID] = make(map[*websocket.Conn]bool)
+	ws.SubscriptionsMux.Lock()
+	defer ws.SubscriptionsMux.Unlock()
+
+	if ws.Connections[conn] == nil {
+		ws.Connections[conn] = make(map[string]struct{})
+	}
+
+	if ws.Chats[chatID] == nil {
+		ws.Chats[chatID] = make(map[*websocket.Conn]struct{})
 	}
 
 	if ws.MessageQueue[chatID] == nil {
 		uc.startMessageProcessor(ws, chatID)
 	}
 
-	ws.Subscriptions[chatID][conn] = true
+	ws.Connections[conn][chatID] = struct{}{}
+	ws.Chats[chatID][conn] = struct{}{}
 }
 
-func (uc *WebsocketUseCase) removeConnection(
+func (uc *WebsocketUseCase) unsubscribeFromChat(
 	ws *entity.WebSocketManager,
 	conn *websocket.Conn,
 	chatID string,
 ) {
-	if ws.Subscriptions[chatID] != nil {
-		delete(ws.Subscriptions[chatID], conn)
+	ws.SubscriptionsMux.Lock()
+	defer ws.SubscriptionsMux.Unlock()
 
-		if len(ws.Subscriptions[chatID]) == 0 {
-			delete(ws.Subscriptions, chatID)
+	if ws.Connections[conn] != nil {
+		delete(ws.Connections[conn], chatID)
+
+		if len(ws.Connections[conn]) == 0 {
+			delete(ws.Connections, conn)
+		}
+	}
+
+	if ws.Chats[chatID] != nil {
+		delete(ws.Chats[chatID], conn)
+
+		if len(ws.Chats[chatID]) == 0 {
+			delete(ws.Chats, chatID)
 			uc.stopMessageProcessor(ws, chatID)
 		}
 	}

@@ -1,8 +1,9 @@
 package entity
 
 import (
-	"github.com/gorilla/websocket"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 type SubscriptionRequest struct {
@@ -18,7 +19,8 @@ type ConnectedMessage struct {
 
 type WebSocketManager struct {
 	Upgrader         websocket.Upgrader
-	Subscriptions    map[string]map[*websocket.Conn]bool
+	Connections      map[*websocket.Conn]map[string]struct{}
+	Chats            map[string]map[*websocket.Conn]struct{}
 	MessageQueue     map[string]chan *ConnectedMessage
 	SubscriptionsMux sync.Mutex
 }
