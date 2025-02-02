@@ -8,7 +8,7 @@ import (
 
 type SubscriptionRequest struct {
 	Type   string `json:"type"`
-	ChatID string `json:"chatId"`
+	ChatID string `json:"queueId"`
 	Nonce  int    `json:"nonce"`
 }
 

@@ -17,7 +17,7 @@ type WaitEventResponse struct {
 
 type WaitEventDetail struct {
 	Type   string `json:"type"`
-	ChatID string `json:"chatId"`
+	ChatID string `json:"queueId"`
 }
 
 type StatusResponse struct {
