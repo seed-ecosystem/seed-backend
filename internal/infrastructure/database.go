@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	_ "github.com/lib/pq"
 	"os"
+
+	_ "github.com/lib/pq"
 )
 
 type DB struct {
@@ -33,7 +34,9 @@ func NewDatabaseConnection() (*DB, error) {
 	return &DB{db}, nil
 }
 
-func (db *DB) InsertMessage(message entity.IncomeMessage) error {
+func (db *DB) InsertMessage(
+	message entity.IncomeMessage,
+) error {
 	chatID, err := base64.StdEncoding.DecodeString(message.Message.ChatID)
 	if err != nil {
 		return fmt.Errorf("invalid ChatID: %v", err)
@@ -54,7 +57,7 @@ func (db *DB) InsertMessage(message entity.IncomeMessage) error {
 		return fmt.Errorf("invalid ContentIV: %v", err)
 	}
 
-	lastNonce, err := db.GetLastNonce(chatID)
+	lastNonce, err := db.getLastNonce(chatID)
 	if err != nil {
 		return fmt.Errorf("error fetching last nonce: %v", err)
 	}
@@ -80,7 +83,11 @@ func (db *DB) InsertMessage(message entity.IncomeMessage) error {
 	return nil
 }
 
-func (db *DB) FetchHistory(chatID []byte, nonce int, amount int) ([]entity.OutcomeMessage, error) {
+func (db *DB) FetchHistory(
+	chatID []byte,
+	nonce int,
+	amount int,
+) ([]entity.OutcomeMessage, error) {
 	var rows *sql.Rows
 	var err error
 
@@ -118,7 +125,9 @@ func (db *DB) FetchHistory(chatID []byte, nonce int, amount int) ([]entity.Outco
 	return messages, nil
 }
 
-func (db *DB) GetLastNonce(chatID []byte) (int, error) {
+func (db *DB) getLastNonce(
+	chatID []byte,
+) (int, error) {
 	var lastNonce sql.NullInt32
 	err := db.QueryRow(`
 		SELECT MAX(nonce) 

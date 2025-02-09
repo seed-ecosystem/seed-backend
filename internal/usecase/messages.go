@@ -5,13 +5,14 @@ import (
 	repository "Seed/internal/interface"
 	"encoding/base64"
 	"fmt"
+
 	"github.com/gorilla/websocket"
 )
 
 const MessagesLimit = 100
 
 type MessagesUseCase struct {
-	DataBaseRepository repository.DataBaseRepository
+	MessagesDataBase repository.MessagesDataBase
 }
 
 func (uc *MessagesUseCase) WaitEventResponse(
@@ -75,7 +76,7 @@ func (uc *MessagesUseCase) UnreadMessagesResponse(
 	currentNonce := nonce
 
 	for {
-		messages, err := uc.DataBaseRepository.FetchHistory(chatID, currentNonce, MessagesLimit)
+		messages, err := uc.FetchHistory(chatID, currentNonce, MessagesLimit)
 
 		if err != nil {
 			fmt.Println("Error fetching history:", err)
@@ -120,4 +121,18 @@ func (uc *MessagesUseCase) IsValidMessage(
 	}
 
 	return true
+}
+
+func (uc *MessagesUseCase) InsertMessage(
+	message entity.IncomeMessage,
+) error {
+	return uc.MessagesDataBase.InsertMessage(message)
+}
+
+func (uc *MessagesUseCase) FetchHistory(
+	chatID []byte,
+	nonce int,
+	amount int,
+) ([]entity.OutcomeMessage, error) {
+	return uc.MessagesDataBase.FetchHistory(chatID, nonce, amount)
 }

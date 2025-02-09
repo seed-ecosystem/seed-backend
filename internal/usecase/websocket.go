@@ -11,7 +11,6 @@ import (
 
 type WebsocketUseCase struct {
 	MessagesRepository repository.MessagesRepository
-	DataBaseRepository repository.DataBaseRepository
 }
 
 func (uc *WebsocketUseCase) NewWebSocketManager() *entity.WebSocketManager {
@@ -143,7 +142,7 @@ func (uc *WebsocketUseCase) startMessageProcessor(
 				return
 			}
 
-			err := uc.DataBaseRepository.InsertMessage(event.Message)
+			err := uc.MessagesRepository.InsertMessage(event.Message)
 			if err != nil {
 				fmt.Println("Error inserting message:", err)
 				uc.MessagesRepository.StatusResponse(event.Connection, false)

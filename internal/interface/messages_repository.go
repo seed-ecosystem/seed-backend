@@ -12,5 +12,8 @@ type MessagesRepository interface {
 
 	StatusResponse(conn *websocket.Conn, status bool)
 	UnreadMessagesResponse(conn *websocket.Conn, chatID []byte, nonce int)
+
 	IsValidMessage(message entity.IncomeMessage) bool
+
+	MessagesDataBase
 }

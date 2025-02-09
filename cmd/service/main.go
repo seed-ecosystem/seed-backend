@@ -16,15 +16,11 @@ func main() {
 	}
 	defer db.Close()
 
-	dataBaseUseCase := &usecase.DataBaseUseCase{
-		MessageRepository: db,
-	}
 	messagesUseCase := &usecase.MessagesUseCase{
-		DataBaseRepository: dataBaseUseCase,
+		MessagesDataBase: db,
 	}
 	websocketUseCase := &usecase.WebsocketUseCase{
 		MessagesRepository: messagesUseCase,
-		DataBaseRepository: dataBaseUseCase,
 	}
 	websocketManager := websocketUseCase.NewWebSocketManager()
 

@@ -13,7 +13,7 @@ func HandleWebSocketConnection(
 	ws *entity.WebSocketManager,
 	w http.ResponseWriter,
 	r *http.Request,
-	responsesUseCase *usecase.MessagesUseCase,
+	messagesUseCase *usecase.MessagesUseCase,
 	websocketUseCase *usecase.WebsocketUseCase,
 ) {
 	conn, err := ws.Upgrader.Upgrade(w, r, nil)
@@ -39,19 +39,19 @@ func HandleWebSocketConnection(
 
 		switch incoming["type"] {
 		case "ping":
-			responsesUseCase.StatusResponse(conn, true)
+			messagesUseCase.StatusResponse(conn, true)
 
 		case "send":
 			var sendMsg entity.IncomeMessage
 			err = json.Unmarshal(msg, &sendMsg)
 			if err != nil {
 				fmt.Println("Error parsing 'send' message:", err)
-				responsesUseCase.StatusResponse(conn, false)
+				messagesUseCase.StatusResponse(conn, false)
 				continue
 			}
 
-			if !responsesUseCase.IsValidMessage(sendMsg) {
-				responsesUseCase.StatusResponse(conn, false)
+			if !messagesUseCase.IsValidMessage(sendMsg) {
+				messagesUseCase.StatusResponse(conn, false)
 				continue
 			}
 
@@ -65,7 +65,14 @@ func HandleWebSocketConnection(
 				fmt.Println("Message has been added to the queue for processing")
 			default:
 				fmt.Println("There are no subscribers to receive a message in the queue")
-				responsesUseCase.StatusResponse(conn, true)
+				err = messagesUseCase.InsertMessage(message.Message)
+				if err != nil {
+					fmt.Println("Error inserting message:", err)
+					messagesUseCase.StatusResponse(conn, false)
+					continue
+				}
+
+				messagesUseCase.StatusResponse(conn, true)
 			}
 
 		case "subscribe":
@@ -73,37 +80,37 @@ func HandleWebSocketConnection(
 			err = json.Unmarshal(msg, &subRequest)
 			if err != nil {
 				fmt.Println("Error parsing 'subscribe' request:", err)
-				responsesUseCase.StatusResponse(conn, false)
+				messagesUseCase.StatusResponse(conn, false)
 				continue
 			}
 
 			chatID, err := base64.StdEncoding.DecodeString(subRequest.ChatID)
 			if err != nil {
 				fmt.Println("Invalid ChatID in 'subscribe' request:", err)
-				responsesUseCase.StatusResponse(conn, false)
+				messagesUseCase.StatusResponse(conn, false)
 				continue
 			}
 
 			websocketUseCase.HandleSubscribe(ws, conn, subRequest.ChatID)
-			responsesUseCase.StatusResponse(conn, true)
-			responsesUseCase.UnreadMessagesResponse(conn, chatID, subRequest.Nonce)
-			responsesUseCase.WaitEventResponse(conn, subRequest.ChatID)
+			messagesUseCase.StatusResponse(conn, true)
+			messagesUseCase.UnreadMessagesResponse(conn, chatID, subRequest.Nonce)
+			messagesUseCase.WaitEventResponse(conn, subRequest.ChatID)
 
 		case "unsubscribe":
 			var unsubRequest entity.SubscriptionRequest
 			err = json.Unmarshal(msg, &unsubRequest)
 			if err != nil {
 				fmt.Println("Error parsing 'unsubscribe' request:", err)
-				responsesUseCase.StatusResponse(conn, false)
+				messagesUseCase.StatusResponse(conn, false)
 				continue
 			}
 
 			websocketUseCase.HandleUnsubscribe(ws, conn, unsubRequest.ChatID)
-			responsesUseCase.StatusResponse(conn, true)
+			messagesUseCase.StatusResponse(conn, true)
 
 		default:
 			fmt.Println("Unknown request type:", incoming["type"])
-			responsesUseCase.StatusResponse(conn, false)
+			messagesUseCase.StatusResponse(conn, false)
 		}
 	}
 }
