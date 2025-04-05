@@ -6,5 +6,5 @@ import (
 
 type MessagesDataBase interface {
 	InsertMessage(message entity.IncomeMessage) error
-	FetchHistory(chatID []byte, nonce int, amount int) ([]entity.OutcomeMessage, error)
+	FetchHistory(chatID []byte, nonce int, amount int) ([]entity.Message, error)
 }

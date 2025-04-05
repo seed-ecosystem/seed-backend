@@ -46,7 +46,7 @@ func (uc *WebsocketUseCase) BroadcastEvent(
 	ws *entity.WebSocketManager,
 	sendMsg entity.IncomeMessage,
 ) {
-	message := entity.OutcomeMessage{
+	message := entity.Message{
 		Nonce:     sendMsg.Message.Nonce,
 		ChatID:    sendMsg.Message.ChatID,
 		Signature: sendMsg.Message.Signature,

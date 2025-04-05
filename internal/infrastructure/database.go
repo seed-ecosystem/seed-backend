@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"Seed/internal/entity"
+	"Seed/internal/queries"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -66,9 +67,7 @@ func (db *DB) InsertMessage(
 		return fmt.Errorf("invalid nonce: got %d, expected %d", message.Message.Nonce, lastNonce+1)
 	}
 
-	_, err = db.Exec(`
-		INSERT INTO messages (nonce, chat_id, signature, content, content_iv)
-		VALUES ($1, $2, $3, $4, $5)`,
+	_, err = db.Exec(queries.InsertMsgQuery,
 		message.Message.Nonce,
 		chatID,
 		signature,
@@ -87,23 +86,18 @@ func (db *DB) FetchHistory(
 	chatID []byte,
 	nonce int,
 	amount int,
-) ([]entity.OutcomeMessage, error) {
+) ([]entity.Message, error) {
 	var rows *sql.Rows
 	var err error
 
-	rows, err = db.Query(`
-			SELECT nonce, chat_id, signature, content, content_iv 
-			FROM messages 
-			WHERE chat_id = $1 AND nonce >= $2 
-			ORDER BY nonce ASC
-			LIMIT $3`, chatID, nonce, amount)
+	rows, err = db.Query(queries.FetchHistoryQuery, chatID, nonce, amount)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch history: %v", err)
 	}
 	defer rows.Close()
 
-	var messages []entity.OutcomeMessage
+	var messages []entity.Message
 	for rows.Next() {
 		var nonce int
 		var chatID, signature, content, contentIV []byte
@@ -113,7 +107,7 @@ func (db *DB) FetchHistory(
 			return nil, fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		messages = append(messages, entity.OutcomeMessage{
+		messages = append(messages, entity.Message{
 			Nonce:     nonce,
 			ChatID:    base64.StdEncoding.EncodeToString(chatID),
 			Signature: base64.StdEncoding.EncodeToString(signature),
@@ -129,10 +123,7 @@ func (db *DB) getLastNonce(
 	chatID []byte,
 ) (int, error) {
 	var lastNonce sql.NullInt32
-	err := db.QueryRow(`
-		SELECT MAX(nonce) 
-		FROM messages 
-		WHERE chat_id = $1`, chatID).Scan(&lastNonce)
+	err := db.QueryRow(queries.FetchHistoryQuery, chatID).Scan(&lastNonce)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, fmt.Errorf("failed to fetch last nonce: %v", err)
 	}

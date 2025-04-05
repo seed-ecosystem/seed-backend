@@ -8,7 +8,7 @@ import (
 
 type MessagesRepository interface {
 	WaitEventResponse(conn *websocket.Conn, chatID string)
-	NewEventResponse(conn *websocket.Conn, message entity.OutcomeMessage) error
+	NewEventResponse(conn *websocket.Conn, message entity.Message) error
 
 	StatusResponse(conn *websocket.Conn, status bool)
 	UnreadMessagesResponse(conn *websocket.Conn, chatID []byte, nonce int)
