@@ -7,7 +7,7 @@ type NewEventResponse struct {
 
 type NewEventDetail struct {
 	Type    string         `json:"type"`
-	Message OutcomeMessage `json:"message"`
+	Message Message `json:"message"`
 }
 
 type WaitEventResponse struct {

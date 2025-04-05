@@ -35,7 +35,7 @@ func (uc *MessagesUseCase) WaitEventResponse(
 
 func (uc *MessagesUseCase) NewEventResponse(
 	conn *websocket.Conn,
-	message entity.OutcomeMessage,
+	message entity.Message,
 ) error {
 	event := entity.NewEventResponse{
 		Type: "event",
@@ -133,6 +133,6 @@ func (uc *MessagesUseCase) FetchHistory(
 	chatID []byte,
 	nonce int,
 	amount int,
-) ([]entity.OutcomeMessage, error) {
+) ([]entity.Message, error) {
 	return uc.MessagesDataBase.FetchHistory(chatID, nonce, amount)
 }
